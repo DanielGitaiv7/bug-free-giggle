@@ -17,9 +17,9 @@ jobs:
           Remove-Item .\tailscale-installer.exe
 
       - name: Authenticate to Tailscale
-        shell: powershell
+        shell: cmd
         run: |
-          tailscale up
+          "C:\Program Files\Tailscale\tailscale.exe" up
 
       - name: Create temporary RDP/Admin user
         shell: powershell
@@ -31,7 +31,6 @@ jobs:
           net user clouduser $pw /add
           net localgroup Administrators clouduser /add
           net localgroup "Remote Desktop Users" clouduser /add
-
           Write-Host "✅ clouduser added to Administrators and Remote Desktop Users."
 
       - name: Apply wallpaper and dark theme for clouduser
