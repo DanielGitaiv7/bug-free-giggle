@@ -24,14 +24,14 @@ jobs:
       - name: Create temporary RDP/Admin user
         shell: powershell
         run: |
-          $pw = [System.Web.Security.Membership]::GeneratePassword(12,2)
-          Write-Host "🧑‍💻 User: clouduser"
-          Write-Host "🔑 Password: $pw"
+          $pw = "VLWINDOWSCLOUD#2025"
+          Write-Host "User: clouduser"
+          Write-Host "Password: $pw"
 
           net user clouduser $pw /add
           net localgroup Administrators clouduser /add
           net localgroup "Remote Desktop Users" clouduser /add
-          Write-Host "✅ clouduser added to Administrators and Remote Desktop Users."
+          Write-Host "clouduser added to Administrators and Remote Desktop Users."
 
       - name: Apply wallpaper and dark theme for clouduser
         shell: powershell
