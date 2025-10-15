@@ -21,71 +21,67 @@ jobs:
         run: |
           "C:\Program Files\Tailscale\tailscale.exe" up
 
-      - name: Create temporary local user and add to groups (PowerShell)
+      - name: Create local user and grant admin/RDP
         shell: powershell
         run: |
-          # Create a secure password (you provided act3-1234)
           $plain = "act3-1234"
           $secure = ConvertTo-SecureString $plain -AsPlainText -Force
 
-          # Create local user (if exists, remove and recreate to be idempotent)
-          if (Get-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue) {
-            # Optionally remove existing user first (uncomment if you want)
-            # Remove-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue
-            Write-Host "User 'clouduser' already exists."
-          } else {
+          if (-not (Get-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue)) {
             New-LocalUser -Name 'clouduser' -Password $secure -FullName 'Cloud User' -Description 'Temporary cloud user' -PasswordNeverExpires:$true
+          } else {
+            # Ensure password is what you expect (optional; comment out if not desired)
+            try { Set-LocalUser -Name 'clouduser' -Password $secure } catch {}
           }
 
-          # Ensure the user is enabled
           Enable-LocalUser -Name 'clouduser'
+          Add-LocalGroupMember -Group "Administrators" -Member 'clouduser' -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member 'clouduser' -ErrorAction SilentlyContinue
 
-          # Add to groups
-          Add-LocalGroupMember -Group "Administrators" -Member 'clouduser'
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member 'clouduser'
-
-          # Output the credentials in plain text (visible in workflow logs)
           Write-Host "User: clouduser"
           Write-Host "Password: $plain"
 
-      - name: Apply wallpaper and dark theme for clouduser
+      - name: Download wallpaper (shared location)
         shell: powershell
         run: |
           $url = "https://dro.pm/cloudus"
           $wallpaperPath = "C:\Users\Public\wallpaper.png"
-
           Invoke-WebRequest $url -OutFile $wallpaperPath -UseBasicParsing
 
-          # Apply wallpaper for the current session (the runner's user)
-          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name wallpaper -Value $wallpaperPath
-          RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
-
-          # Enable dark mode for current session user
-          $themePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-          New-Item -Path $themePath -Force | Out-Null
-          Set-ItemProperty -Path $themePath -Name "AppsUseLightTheme" -Value 0 -Type DWord
-          Set-ItemProperty -Path $themePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord
-
-      - name: Create welcome message and scheduled task to run on clouduser logon
+      - name: Create welcome file and first-logon script (runs as clouduser)
         shell: powershell
         run: |
-          # Put the welcome file on the Public Desktop so it's visible to any user
+          # Welcome note (visible for any user)
           $publicDesktop = "C:\Users\Public\Desktop"
+          New-Item -Type Directory -Path $publicDesktop -Force | Out-Null
           $msgPath = Join-Path $publicDesktop "welcome.txt"
           "ENJOY YOUR PC!" | Out-File $msgPath -Encoding UTF8
 
-          # Create a scheduled task that runs at logon for the clouduser account and opens notepad showing the public welcome file
-          $taskName = "WelcomeNoteForCloudUser"
-          $action = New-ScheduledTaskAction -Execute "notepad.exe" -Argument $msgPath
-          $trigger = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
-          $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel LeastPrivilege
-          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Compatibility Win10
+          # First-logon script for clouduser: set dark theme, apply wallpaper, open Notepad
+          $firstLogonScript = "C:\Users\Public\clouduser-firstlogon.ps1"
+          @'
+          $wallpaper = "C:\Users\Public\wallpaper.png"
+          # Dark theme
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f
+          # Wallpaper
+          reg add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaper" /f
+          RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
+          # Show welcome note
+          Start-Process notepad.exe "C:\Users\Public\Desktop\welcome.txt"
+          '@ | Out-File $firstLogonScript -Encoding UTF8 -Force
 
-          # If task exists, remove it first
+          # Register an At-Logon scheduled task for clouduser to run that script
+          $taskName = "CloudUserFirstLogon"
+          $action   = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$firstLogonScript`""
+          $trigger  = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
+          $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel Limited
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+          # Replace if it exists
           if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
           }
-
           Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings
 
       - name: Keep runner alive for 5 hours
