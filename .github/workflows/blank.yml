@@ -1,4 +1,4 @@
-name: Cloud PC Setup (Windows + Tailscale + RDP + Wallpaper + Dark Mode + Auto Notepad)
+name: Cloud PC Setup (Tailscale Auth Key + User + RDP + Wallpaper + Dark Mode)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   setup:
     runs-on: windows-latest
-    timeout-minutes: 300   # 5 hours
+    timeout-minutes: 300  # 5 hours
 
     steps:
       - name: Install Tailscale
@@ -16,73 +16,63 @@ jobs:
           Start-Process .\tailscale-installer.exe -ArgumentList "/quiet" -Wait
           Remove-Item .\tailscale-installer.exe
 
-      - name: Authenticate to Tailscale
+      - name: Authenticate to Tailscale (using Auth Key)
         shell: cmd
         run: |
-          "C:\Program Files\Tailscale\tailscale.exe" up
+          "C:\Program Files\Tailscale\tailscale.exe" up --authkey %TS_AUTHKEY% --accept-dns=false --accept-routes=false
+
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
 
       - name: Create local user and grant admin/RDP
         shell: powershell
         run: |
-          $plain = "act3-1234"
-          $secure = ConvertTo-SecureString $plain -AsPlainText -Force
+          $pw = "act3-1234"
+          $secure = ConvertTo-SecureString $pw -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name 'clouduser' -Password $secure -FullName 'Cloud User' -Description 'Temporary cloud user' -PasswordNeverExpires:$true
-          } else {
-            # Ensure password is what you expect (optional; comment out if not desired)
-            try { Set-LocalUser -Name 'clouduser' -Password $secure } catch {}
+            New-LocalUser -Name 'clouduser' -Password $secure -FullName 'Cloud User' -Description 'Temporary Cloud PC user' -PasswordNeverExpires:$true
           }
 
           Enable-LocalUser -Name 'clouduser'
           Add-LocalGroupMember -Group "Administrators" -Member 'clouduser' -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member 'clouduser' -ErrorAction SilentlyContinue
+          Write-Host "Created user 'clouduser' with password: $pw"
 
-          Write-Host "User: clouduser"
-          Write-Host "Password: $plain"
-
-      - name: Download wallpaper (shared location)
+      - name: Download wallpaper (shared)
         shell: powershell
         run: |
           $url = "https://dro.pm/cloudus"
           $wallpaperPath = "C:\Users\Public\wallpaper.png"
           Invoke-WebRequest $url -OutFile $wallpaperPath -UseBasicParsing
 
-      - name: Create welcome file and first-logon script (runs as clouduser)
+      - name: Create first-logon script for dark mode, wallpaper, and Notepad
         shell: powershell
         run: |
-          # Welcome note (visible for any user)
           $publicDesktop = "C:\Users\Public\Desktop"
           New-Item -Type Directory -Path $publicDesktop -Force | Out-Null
           $msgPath = Join-Path $publicDesktop "welcome.txt"
           "ENJOY YOUR PC!" | Out-File $msgPath -Encoding UTF8
 
-          # First-logon script for clouduser: set dark theme, apply wallpaper, open Notepad
-          $firstLogonScript = "C:\Users\Public\clouduser-firstlogon.ps1"
+          $scriptPath = "C:\Users\Public\clouduser-firstlogon.ps1"
           @'
           $wallpaper = "C:\Users\Public\wallpaper.png"
-          # Dark theme
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f
-          # Wallpaper
           reg add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaper" /f
           RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
-          # Show welcome note
           Start-Process notepad.exe "C:\Users\Public\Desktop\welcome.txt"
-          '@ | Out-File $firstLogonScript -Encoding UTF8 -Force
+          '@ | Out-File $scriptPath -Encoding UTF8 -Force
 
-          # Register an At-Logon scheduled task for clouduser to run that script
-          $taskName = "CloudUserFirstLogon"
-          $action   = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$firstLogonScript`""
-          $trigger  = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
+          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+          $trigger = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
           $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel Limited
           $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-          # Replace if it exists
-          if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+          if (Get-ScheduledTask -TaskName "CloudUserFirstLogon" -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName "CloudUserFirstLogon" -Confirm:$false
           }
-          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+          Register-ScheduledTask -TaskName "CloudUserFirstLogon" -Action $action -Trigger $trigger -Principal $principal -Settings $settings
 
       - name: Keep runner alive for 5 hours
         shell: powershell
