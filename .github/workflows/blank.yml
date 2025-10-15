@@ -12,17 +12,14 @@ jobs:
       - name: Install Tailscale
         shell: powershell
         run: |
-          Write-Host "🚀 Installing Tailscale..."
           Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe -OutFile tailscale-installer.exe
           Start-Process .\tailscale-installer.exe -ArgumentList "/quiet" -Wait
           Remove-Item .\tailscale-installer.exe
-          Write-Host "✅ Tailscale installed."
 
       - name: Authenticate to Tailscale
         shell: powershell
         run: |
           tailscale up
-          Write-Host "🔗 Open the link above to authenticate this Cloud PC to your Tailnet."
 
       - name: Create temporary RDP/Admin user
         shell: powershell
@@ -34,18 +31,17 @@ jobs:
           net user clouduser $pw /add
           net localgroup Administrators clouduser /add
           net localgroup "Remote Desktop Users" clouduser /add
+
           Write-Host "✅ clouduser added to Administrators and Remote Desktop Users."
 
       - name: Apply wallpaper and dark theme for clouduser
         shell: powershell
         run: |
-          Write-Host "🖼️ Applying wallpaper and dark theme..."
           $url = "https://dro.pm/cloudus"
           $wallpaperPath = "C:\Users\clouduser\wallpaper.png"
-
           Invoke-WebRequest $url -OutFile $wallpaperPath
 
-          # Set wallpaper for clouduser
+          # Apply wallpaper
           Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name wallpaper -Value $wallpaperPath
           RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
 
@@ -54,26 +50,19 @@ jobs:
           New-Item -Path $themePath -Force | Out-Null
           Set-ItemProperty -Path $themePath -Name "AppsUseLightTheme" -Value 0 -Type DWord
           Set-ItemProperty -Path $themePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord
-          Write-Host "✅ Dark theme applied successfully."
 
       - name: Add Notepad welcome message (runs after login)
         shell: powershell
         run: |
-          Write-Host "📝 Setting up post-login Notepad message..."
           $msgPath = "C:\Users\clouduser\Desktop\welcome.txt"
           "ENJOY YOUR PC!" | Out-File $msgPath -Encoding UTF8
 
-          # Create registry entry so Notepad launches on login for clouduser
-          $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Userinit"
-          $runKeyPath = "HKU\.DEFAULT\Software\Microsoft\Windows\CurrentVersion\Run"
+          # Auto-launch Notepad on user login
           reg load HKU\clouduser "C:\Users\clouduser\NTUSER.DAT"
           reg add "HKU\clouduser\Software\Microsoft\Windows\CurrentVersion\Run" /v WelcomeNote /t REG_SZ /d "notepad.exe $msgPath" /f
           reg unload HKU\clouduser
 
-          Write-Host "✅ Notepad will open with 'ENJOY YOUR PC!' after login."
-
       - name: Keep runner alive for 5 hours
         shell: powershell
         run: |
-          Write-Host "🏁 Cloud PC ready — connect via Tailscale (RDP enabled). Active for 5 hours."
           Start-Sleep -Seconds 18000
