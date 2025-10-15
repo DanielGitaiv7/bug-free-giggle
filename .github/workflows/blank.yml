@@ -21,45 +21,72 @@ jobs:
         run: |
           "C:\Program Files\Tailscale\tailscale.exe" up
 
-      - name: Create temporary RDP/Admin user
+      - name: Create temporary local user and add to groups (PowerShell)
         shell: powershell
         run: |
-          $pw = "VLWINDOWSCLOUD#2025"
-          Write-Host "User: clouduser"
-          Write-Host "Password: $pw"
+          # Create a secure password (you provided act3-1234)
+          $plain = "act3-1234"
+          $secure = ConvertTo-SecureString $plain -AsPlainText -Force
 
-          net user clouduser $pw /add
-          net localgroup Administrators clouduser /add
-          net localgroup "Remote Desktop Users" clouduser /add
-          Write-Host "clouduser added to Administrators and Remote Desktop Users."
+          # Create local user (if exists, remove and recreate to be idempotent)
+          if (Get-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue) {
+            # Optionally remove existing user first (uncomment if you want)
+            # Remove-LocalUser -Name 'clouduser' -ErrorAction SilentlyContinue
+            Write-Host "User 'clouduser' already exists."
+          } else {
+            New-LocalUser -Name 'clouduser' -Password $secure -FullName 'Cloud User' -Description 'Temporary cloud user' -PasswordNeverExpires:$true
+          }
+
+          # Ensure the user is enabled
+          Enable-LocalUser -Name 'clouduser'
+
+          # Add to groups
+          Add-LocalGroupMember -Group "Administrators" -Member 'clouduser'
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member 'clouduser'
+
+          # Output the credentials in plain text (visible in workflow logs)
+          Write-Host "User: clouduser"
+          Write-Host "Password: $plain"
 
       - name: Apply wallpaper and dark theme for clouduser
         shell: powershell
         run: |
           $url = "https://dro.pm/cloudus"
-          $wallpaperPath = "C:\Users\clouduser\wallpaper.png"
-          Invoke-WebRequest $url -OutFile $wallpaperPath
+          $wallpaperPath = "C:\Users\Public\wallpaper.png"
 
-          # Apply wallpaper
+          Invoke-WebRequest $url -OutFile $wallpaperPath -UseBasicParsing
+
+          # Apply wallpaper for the current session (the runner's user)
           Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\' -Name wallpaper -Value $wallpaperPath
           RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
 
-          # Enable dark mode
+          # Enable dark mode for current session user
           $themePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           New-Item -Path $themePath -Force | Out-Null
           Set-ItemProperty -Path $themePath -Name "AppsUseLightTheme" -Value 0 -Type DWord
           Set-ItemProperty -Path $themePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord
 
-      - name: Add Notepad welcome message (runs after login)
+      - name: Create welcome message and scheduled task to run on clouduser logon
         shell: powershell
         run: |
-          $msgPath = "C:\Users\clouduser\Desktop\welcome.txt"
+          # Put the welcome file on the Public Desktop so it's visible to any user
+          $publicDesktop = "C:\Users\Public\Desktop"
+          $msgPath = Join-Path $publicDesktop "welcome.txt"
           "ENJOY YOUR PC!" | Out-File $msgPath -Encoding UTF8
 
-          # Auto-launch Notepad on user login
-          reg load HKU\clouduser "C:\Users\clouduser\NTUSER.DAT"
-          reg add "HKU\clouduser\Software\Microsoft\Windows\CurrentVersion\Run" /v WelcomeNote /t REG_SZ /d "notepad.exe $msgPath" /f
-          reg unload HKU\clouduser
+          # Create a scheduled task that runs at logon for the clouduser account and opens notepad showing the public welcome file
+          $taskName = "WelcomeNoteForCloudUser"
+          $action = New-ScheduledTaskAction -Execute "notepad.exe" -Argument $msgPath
+          $trigger = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
+          $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel LeastPrivilege
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Compatibility Win10
+
+          # If task exists, remove it first
+          if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+          }
+
+          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings
 
       - name: Keep runner alive for 5 hours
         shell: powershell
