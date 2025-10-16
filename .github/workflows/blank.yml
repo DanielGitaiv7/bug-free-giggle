@@ -1,4 +1,4 @@
-name: Cloud PC Setup (Manual Tailscale Login + User + RDP + Dropbox Wallpaper + Dark Mode + Custom Welcome)
+name: Cloud PC Setup (Manual Tailscale Login + User + RDP + Dropbox Wallpaper + Dark Mode + Welcome)
 
 on:
   workflow_dispatch:
@@ -43,10 +43,9 @@ jobs:
           $wallpaperPath = "C:\Users\Public\wallpaper.png"
           Invoke-WebRequest $url -OutFile $wallpaperPath -UseBasicParsing
 
-      - name: Create first-logon script for dark mode, wallpaper, and Notepad
+      - name: Create first-logon script (Wallpaper + Dark Mode + Notepad)
         shell: powershell
         run: |
-          # Prepare welcome text on Public Desktop
           $publicDesktop = "C:\Users\Public\Desktop"
           New-Item -Type Directory -Path $publicDesktop -Force | Out-Null
           $msgPath = Join-Path $publicDesktop "welcome.txt"
@@ -56,19 +55,23 @@ jobs:
           )
           $welcomeLines -join [Environment]::NewLine | Set-Content -Path $msgPath -Encoding UTF8
 
-          # Build first-logon PowerShell script content (no here-strings)
           $scriptPath = "C:\Users\Public\clouduser-firstlogon.ps1"
           $scriptLines = @(
+            'Start-Sleep -Seconds 5',
             '$wallpaper = "C:\Users\Public\wallpaper.png"',
+            'if (Test-Path $wallpaper) {',
+            '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name Wallpaper -Value $wallpaper',
+            '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name WallpaperStyle -Value 10',
+            '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TileWallpaper -Value 0',
+            '  RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters 1, True',
+            '}',
+            '# Enable full dark mode (system + apps)',
             'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f',
             'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f',
-            'reg add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaper" /f',
-            'RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters',
             'Start-Process notepad.exe "C:\Users\Public\Desktop\welcome.txt"'
           )
           $scriptLines -join [Environment]::NewLine | Set-Content -Path $scriptPath -Encoding UTF8
 
-          # Register scheduled task to run at clouduser logon
           $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
           $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
           $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel Limited
