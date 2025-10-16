@@ -6,7 +6,7 @@ on:
 jobs:
   setup:
     runs-on: windows-latest
-    timeout-minutes: 300   # 5 hours
+    timeout-minutes: 300  # 5 hours
 
     steps:
       - name: Install Tailscale
@@ -46,30 +46,33 @@ jobs:
       - name: Create first-logon script for dark mode, wallpaper, and Notepad
         shell: powershell
         run: |
+          # Prepare welcome text on Public Desktop
           $publicDesktop = "C:\Users\Public\Desktop"
           New-Item -Type Directory -Path $publicDesktop -Force | Out-Null
           $msgPath = Join-Path $publicDesktop "welcome.txt"
+          $welcomeLines = @(
+            'Your PC Starts here! Code/Program/Game (May be laggy) or do anything you want! (NO MINING!!!)',
+            'MADE BY DANIEL 64!!!!!'
+          )
+          $welcomeLines -join [Environment]::NewLine | Set-Content -Path $msgPath -Encoding UTF8
 
-          # Custom welcome text
-          @"
-Your PC Starts here! Code/Program/Game (May be laggy) or do anything you want! (NO MINING!!!)
-MADE BY DANIEL 64!!!!!
-"@ | Out-File $msgPath -Encoding UTF8
-
+          # Build first-logon PowerShell script content (no here-strings)
           $scriptPath = "C:\Users\Public\clouduser-firstlogon.ps1"
-          @'
-          $wallpaper = "C:\Users\Public\wallpaper.png"
-          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f
-          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f
-          reg add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaper" /f
-          RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters
-          Start-Process notepad.exe "C:\Users\Public\Desktop\welcome.txt"
-          '@ | Out-File $scriptPath -Encoding UTF8 -Force
+          $scriptLines = @(
+            '$wallpaper = "C:\Users\Public\wallpaper.png"',
+            'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f',
+            'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f',
+            'reg add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d "$wallpaper" /f',
+            'RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters',
+            'Start-Process notepad.exe "C:\Users\Public\Desktop\welcome.txt"'
+          )
+          $scriptLines -join [Environment]::NewLine | Set-Content -Path $scriptPath -Encoding UTF8
 
-          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-          $trigger = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
+          # Register scheduled task to run at clouduser logon
+          $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+          $trigger   = New-ScheduledTaskTrigger -AtLogOn -User "clouduser"
           $principal = New-ScheduledTaskPrincipal -UserId "clouduser" -LogonType Interactive -RunLevel Limited
-          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+          $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
           if (Get-ScheduledTask -TaskName "CloudUserFirstLogon" -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName "CloudUserFirstLogon" -Confirm:$false
