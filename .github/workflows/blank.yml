@@ -1,4 +1,4 @@
-name: Cloud PC Setup (Tailscale Auth Key + User + RDP + Wallpaper + Dark Mode)
+name: Cloud PC Setup (Manual Tailscale Login + User + RDP + Dropbox Wallpaper + Dark Mode + Custom Welcome)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   setup:
     runs-on: windows-latest
-    timeout-minutes: 300  # 5 hours
+    timeout-minutes: 300   # 5 hours
 
     steps:
       - name: Install Tailscale
@@ -16,13 +16,10 @@ jobs:
           Start-Process .\tailscale-installer.exe -ArgumentList "/quiet" -Wait
           Remove-Item .\tailscale-installer.exe
 
-      - name: Authenticate to Tailscale (using Auth Key)
+      - name: Run Tailscale up (manual auth)
         shell: cmd
         run: |
-          "C:\Program Files\Tailscale\tailscale.exe" up --authkey %TS_AUTHKEY% --accept-dns=false --accept-routes=false
-
-        env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          "C:\Program Files\Tailscale\tailscale.exe" up
 
       - name: Create local user and grant admin/RDP
         shell: powershell
@@ -39,10 +36,10 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member 'clouduser' -ErrorAction SilentlyContinue
           Write-Host "Created user 'clouduser' with password: $pw"
 
-      - name: Download wallpaper (shared)
+      - name: Download wallpaper (from Dropbox)
         shell: powershell
         run: |
-          $url = "https://dro.pm/cloudus"
+          $url = "https://www.dropbox.com/scl/fi/tp8sudlgesdl8l2mc6ocn/file_000000002f3061f4b6eb595468ca6321-1.png?rlkey=d8agt52cu0atv9z5vqzw4vpkm&st=1y3w3zot&dl=1"
           $wallpaperPath = "C:\Users\Public\wallpaper.png"
           Invoke-WebRequest $url -OutFile $wallpaperPath -UseBasicParsing
 
@@ -52,7 +49,12 @@ jobs:
           $publicDesktop = "C:\Users\Public\Desktop"
           New-Item -Type Directory -Path $publicDesktop -Force | Out-Null
           $msgPath = Join-Path $publicDesktop "welcome.txt"
-          "ENJOY YOUR PC!" | Out-File $msgPath -Encoding UTF8
+
+          # Custom welcome text
+          @"
+Your PC Starts here! Code/Program/Game (May be laggy) or do anything you want! (NO MINING!!!)
+MADE BY DANIEL 64!!!!!
+"@ | Out-File $msgPath -Encoding UTF8
 
           $scriptPath = "C:\Users\Public\clouduser-firstlogon.ps1"
           @'
